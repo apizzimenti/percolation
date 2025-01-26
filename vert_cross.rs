@@ -1,72 +1,80 @@
-//Subsitutes all occurences of one element within a vector with another element
-fn subst<T: Eq + Clone>(v: &mut Vec<T>, old: T, new: T) {
-    v.iter_mut().for_each(|x| if *x == old {*x = new.clone()});
-}
+use std::collections::HashSet;
 
-//Given the index of an edge, returns the indicies of it's corresponding endpoint vertices
-fn endpoints(r: usize, c: usize, i : usize) -> (usize, usize) {
-    if i < (r + 1) * c {
-        ((i / c) * r + (i % c), 
-         (i / c) * r + (i % c) + r)
+use union_find::{QuickUnionUf, Union, UnionFind, UnionResult};
+
+//Function which takes edge indicies to pairs of vertex indicies
+fn endpoints(n: usize, i: usize) -> (usize, usize) {
+    if i < (n+1)*n {
+        (i, i+n)
     } else {
-        let i = i - ((r + 1) * c);
-        ((i / (c - 1)) * r + (i % (c - 1)),
-         (i / (c - 1)) * r + (i % (c - 1)) + 1)
+        let i = i - (n+1)*n;
+        let x = i % (n - 1);
+        let y = 1 + (i / (n - 1));
+        (y*n+x, y*n+x+1)
     }
 }
 
-fn main() {
-    //The number of rows and columns (not counting top and bottom vertical edges)
-    let (r, c) = (100, 100);
+//Structure which holds the metadata about each connected compoent: It's rank and whether it's connected to the top and/or bottom
+#[derive(Copy, Clone, Debug, Default)]
+struct ComponentData {
+    rank: u8,
+    bottom: bool,
+    top: bool,
+}
 
-    //The total number of vertices (including top and bottom "halfway" verticies)
-    let num_vertices = (r + 2) * c;
-    //Initalize an array that keeps track of connected components of verticies. Initalize with every vertex having it's own ID (0, 1, 2...).
-    let mut vertices = (0..num_vertices).map(|i| i).collect::<Vec<_>>();
-    
-    //The total number of edges
-    let num_edges = (r + 1) * c + r * (c - 1);
-    //Initalize an array full of 'false' to correspond with an empty graph
-    let mut edges = (0..num_edges).map(|_| false).collect::<Vec<_>>();
-    
-    //Maximum number of edges to try
-    let max_edges = 100000;
+//Implentation for how to combine the data attached to two connected components, the top and/or bottom flags are marked
+//as true for the new combined component iff the respective flag is true for at least one of the two partial components.
+impl Union for ComponentData {
+    fn union(left: ComponentData, right: ComponentData) -> UnionResult<ComponentData> {
+        let rank = if left.rank == right.rank {left.rank + 1} else {std::cmp::max(left.rank, right.rank)};
 
-    for n in 0..max_edges {
-        //Pick a random edge index
-        let mut i = rand::random::<usize>() % num_edges;
+        let (bottom, top) = (left.bottom || right.bottom, left.top || right.top);
 
-        //Check if edge is already present, if so, select new edge index
-        while edges[i] {
-            i = rand::random::<usize>() % num_edges;
-        }
-
-        //Add edge to graph
-        edges[i] = true;
-
-        //Determine connected component IDs of endpoints
-        let (a, b) = endpoints(r, c, i);
-        let min: usize = std::cmp::min(vertices[a], vertices[b]);
-        let max: usize = std::cmp::max(vertices[a], vertices[b]);
-
-        //Check if this edge will create a vertical crossing
-        let mut completer = false;
-        for j in vertices.len()-c..vertices.len() {
-            if (vertices[j] < c) || ((min < c) && vertices[j] == max) {
-                completer = true;
-            }
-        }
-        if completer {
-            //If so, break out of the loop
-            println!("Vertical crossing created after {} edges added", n);
-            break;
+        if left.rank < right.rank {
+            UnionResult::Right(ComponentData{rank, bottom, top})
         } else {
-            //If not, subsittue all occurences of the max ID with the min ID
-            subst(&mut vertices, max, min);
-        }
-        //Panic if about to run out of edges
-        if n == max_edges - 1 {
-            panic!("Added {} edges, did not create vertical crossing", n);
+            UnionResult::Left(ComponentData{rank, bottom, top})
         }
     }
+}
+
+
+fn main(){
+    //Grid Size
+    let n = 4000;
+
+    //Initialize Union-Find strcture on verticies
+    let mut uf = QuickUnionUf::<ComponentData>::new((n+2)*n);
+
+    //Initalize edge hashset (not used for algorithim but needed to recover the graph)
+    let mut edges = HashSet::<usize>::new();
+
+    //Mark the top and bottom row of verticies as connected to the top and bottom respectivly (default for those flags is false)
+    (0..n).for_each(|i| {
+        uf.get_mut(i).bottom = true; 
+        uf.get_mut((n+1)*n+i).top = true; 
+    });
+
+    //Initalize some varibles, 'i' to hold the edge index and 'a' and 'b' to hold the vertex indicies of the endpoints
+    let (mut i, mut a, mut b); (a, i) = (0, 0);
+
+    while !(uf.get(a).top && uf.get(a).bottom) {
+        //Generate a random edge index.
+        i = rand::random::<usize>() % ((n+1)*n + n*(n-1));
+
+        //Insert the edge index into the HashSet
+        edges.insert(i);
+
+        //Determine the two endpoint indicies
+        (a, b) = endpoints(n, i);
+        
+        //Combine the two components that the endpoints lie within
+        uf.union(a, b);
+    }
+    
+    //Remove the most recent edge added
+    edges.remove(&i);
+
+    //Display the number of edges
+    println!("{:?}", edges.len());
 }
